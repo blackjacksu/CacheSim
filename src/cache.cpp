@@ -8,7 +8,7 @@
 #include <string>
 #include <queue>
 
-#define DEBUG 1
+#define DEBUG 0
 
 #define KB 1024
 
@@ -29,7 +29,6 @@ class cache{
         unsigned int total_cache_size; // size of the total cache: 4096, 8192... (Unit: kilo-Byte)
         unsigned int total_cache_set; // total number of the cache set
         unsigned int cache_set_count; // counter of the cache set
-        unsigned int total_cache_block; // total number of the cache block
         unsigned int block_size; // size of block: 1024, 2048, 4096... (Unit: Byte)
         unsigned int n; // set associtive: N = 1, 2, 4...
         char replacement_policy; // 
@@ -39,11 +38,11 @@ class cache{
         
 
         // Output data
-        unsigned int read_miss;
-        unsigned int read_hit;
+        unsigned long int read_miss;
+        unsigned long int read_hit;
 
-        unsigned int write_miss;
-        unsigned int write_hit;
+        unsigned long int write_miss;
+        unsigned long int write_hit;
 
         char add_new_block(unsigned int block_index);
 
@@ -64,9 +63,15 @@ class cache{
 
         char access_data_from_cache(string opcode, unsigned long long int addr);
 
-        unsigned int get_r_miss_cnt();
+        unsigned long int get_r_miss_cnt();
         
-        unsigned int get_w_miss_cnt();
+        unsigned long int get_r_total_cnt();
+        
+        unsigned long int get_w_miss_cnt();
+
+        unsigned long int get_w_total_cnt();
+
+        unsigned long int get_op_total_cnt();
 
         ~cache();
 };
@@ -85,6 +90,8 @@ cache::cache()
     total_cache_set = total_cache_size * 1 * KB / (block_size * n);
     replacement_policy = 'l';
     cache_set_count = 0;
+
+    head = tail = NULL;
 }
 
 // Constructor
@@ -102,6 +109,8 @@ cache::cache(unsigned int _total_size, unsigned int _block_size, unsigned int _n
     total_cache_set = total_cache_size * 1 * KB / (block_size * n);
     replacement_policy = 'l';
     cache_set_count = 0;
+
+    head = tail = NULL;
 }
 
 char cache::add_new_block(unsigned int block_index)
@@ -121,6 +130,7 @@ char cache::add_new_block(unsigned int block_index)
         // Add new node to the head
         // Nothing in cache
         new_node->mem_block_index = block_index;
+        new_node->prev = NULL;
         new_node->next = NULL;
         head = new_node;
         tail = head;
@@ -135,9 +145,9 @@ char cache::add_new_block(unsigned int block_index)
         head = new_node;
     }
 
-#if DEBUG
-    print_list();
-#endif
+// #if DEBUG
+//     print_list();
+// #endif
     return ret;
 }
 
@@ -151,14 +161,13 @@ char cache::remove_victim_block()
     }
 
     cache_set_count--;
-
     tail = tail->prev;
-    delete tail->next;
+    free(tail->next);
     tail->next = NULL;
 
-#if DEBUG
-    print_list();
-#endif
+// #if DEBUG
+//     print_list();
+// #endif
     return ret;
 }
 
@@ -170,14 +179,14 @@ char cache::replace_block(unsigned int block_index)
     // Then add new block
     add_new_block(block_index);
 
-#if DEBUG
-    print_list();
-#endif
+// #if DEBUG
+//     print_list();
+// #endif
+    return 0;
 }
 
 struct cacheblock * cache::search_cache_block(string opcode, unsigned int block_index)
 {
-    bool is_hit = false;
     struct cacheblock * ptr_node;
 
     if (head != NULL)
@@ -189,8 +198,6 @@ struct cacheblock * cache::search_cache_block(string opcode, unsigned int block_
             if (ptr_node->mem_block_index == block_index)
             {
                 // Found the block in cache, we have a hit
-                is_hit = true;
-                
                 return ptr_node;
             }
             // traverse to the next node
@@ -198,15 +205,15 @@ struct cacheblock * cache::search_cache_block(string opcode, unsigned int block_
         }
     }
     
-#if DEBUG
-    print_list();
-#endif
+// #if DEBUG
+//     print_list();
+// #endif
     return NULL;
 }
 
 char cache::switch_block_to_head(struct cacheblock * ptr)
 {
-    char ret = -1;
+    char ret = 0;
     // Make the target block to the head
     if (ptr->prev == NULL)
     {
@@ -220,6 +227,7 @@ char cache::switch_block_to_head(struct cacheblock * ptr)
         tail = ptr->prev;
         tail->next = NULL;
         ptr->next = head;
+        head->prev = ptr;
         ptr->prev = NULL;
         head = ptr;
     }
@@ -228,13 +236,13 @@ char cache::switch_block_to_head(struct cacheblock * ptr)
         ptr->prev->next = ptr->next;
         ptr->next->prev = ptr->prev;
         ptr->next = head;
+        head->prev = ptr;
         ptr->prev = NULL;
         head = ptr;
     }
 #if DEBUG
     print_list();
 #endif
-    ret = 0;
     return ret;
 }
 
@@ -248,6 +256,7 @@ void cache::print_list()
         ptr = ptr->next;
     }    
     cout << "x" << endl;
+    cout << "read_miss:" << read_miss << ", read_hit:" << read_hit << ", write_miss:" << write_miss << ", write_hit:" << write_hit << endl;
 }
 #endif
 
@@ -255,11 +264,13 @@ void cache::print_list()
 char cache::access_data_from_cache(string opcode, unsigned long long int addr)
 {
     char ret = 0;
-    bool is_hit = false;
     unsigned int block_index = addr / block_size;
     unsigned int set_index = addr / (block_size * n);
     unsigned int offset = addr % block_size;
     struct cacheblock * target_block;
+#if DEBUG 
+    cout << "Memory block: " << block_index << ", Cache set: " << set_index << endl;
+#endif
 
     if (head == NULL)
     {
@@ -268,6 +279,15 @@ char cache::access_data_from_cache(string opcode, unsigned long long int addr)
         if (ret < 0)
         {
             cout << "Error: the cache is full" << endl;
+        }
+
+        if (opcode == "w")
+        {
+            write_miss++;
+        }
+        else if (opcode == "r")
+        {
+            read_miss++;
         }
     }
     else
@@ -280,12 +300,10 @@ char cache::access_data_from_cache(string opcode, unsigned long long int addr)
             // Cached it already
             if (opcode == "w")
             {
-                cout << "Write: " << addr << endl;
                 write_hit++;
             }
             else if (opcode == "r")
             {
-                cout << "Read: " << addr << endl;
                 read_hit++;
             }
             switch_block_to_head(target_block);
@@ -295,31 +313,54 @@ char cache::access_data_from_cache(string opcode, unsigned long long int addr)
             // Miss occured
             ret = add_new_block(block_index);
 
+            if (ret < 0)
+            {
+                // cout << "Error: the cache is full" << endl;
+                replace_block(block_index);
+            }
+
             if (opcode == "w")
             {
-                cout << "Write: " << addr << endl;
                 write_miss++;
             }
             else if (opcode == "r")
             {
-                cout << "Read: " << addr << endl;
                 read_miss++;
             }
         }
     }
+    
+#if DEBUG
+    print_list();
+#endif
 
     return ret;
 }
 
 // Class methods 
-unsigned int cache::get_r_miss_cnt()
+unsigned long int cache::get_r_miss_cnt()
 {
     return read_miss;
 }
 
-unsigned int cache::get_w_miss_cnt()
+unsigned long int cache::get_r_total_cnt()
+{
+    return (read_miss + read_hit);
+}
+
+unsigned long int cache::get_w_miss_cnt()
 {
     return write_miss;
+}
+
+unsigned long int cache::get_w_total_cnt()
+{
+    return (write_miss + write_hit);
+}
+
+unsigned long int cache::get_op_total_cnt()
+{
+    return (write_miss + write_hit + read_miss + read_hit);
 }
 
 // Destructor
@@ -345,9 +386,9 @@ int main(int argc, char **argv) {
 
     unsigned int total_miss;
     double total_miss_rate;
-    unsigned int w_miss;
+    unsigned long int w_miss;
     double w_miss_rate;    
-    unsigned int r_miss;
+    unsigned long int r_miss;
     double r_miss_rate;
 
     // Assert the argc is correct
@@ -372,11 +413,8 @@ int main(int argc, char **argv) {
 #endif
         // Parse the operator and memory address
         str_index = std_in.find_first_of(delimiter);
-        cout << "delimeter: " << str_index << endl;
         opcode = std_in.substr(0, 1);
-        addr_length = std_in.length() - 2;
         std_in = std_in.substr(str_index + 1, std_in.length() - 2);
-        cout << "Address: " << std_in << endl;
         if (!std_in.empty())
         {
             // parse the address from cin
@@ -384,8 +422,7 @@ int main(int argc, char **argv) {
         }
 
 #if DEBUG
-        cout << "Operation: " << opcode << endl;
-        cout << "Address: " << addr << endl;
+        cout << "Operation: " << opcode << ", Address: " << addr << endl;
 #endif
 
         // request data from cache
@@ -402,15 +439,19 @@ int main(int argc, char **argv) {
 
     // Request data from cache class
     r_miss = CacheSim.get_r_miss_cnt();
+    r_miss_rate = 100.0 * r_miss / CacheSim.get_r_total_cnt();
     w_miss = CacheSim.get_w_miss_cnt();
+    w_miss_rate = 100.0 * w_miss / CacheSim.get_w_total_cnt();
+    total_miss = r_miss + w_miss;
+    total_miss_rate = 100.0 * total_miss / CacheSim.get_op_total_cnt();
 
     // Output statistics to terminal
     cout << total_miss << " "; 
-    cout << total_miss_rate << " "; 
-    cout << w_miss << " "; 
-    cout << w_miss_rate << " "; 
+    cout << total_miss_rate << "% "; 
     cout << r_miss << " "; 
-    cout << r_miss_rate << " "; 
+    cout << r_miss_rate << "% ";     
+    cout << w_miss << " "; 
+    cout << w_miss_rate << "% "; 
     cout << endl;
 
     return 0;
